@@ -1,0 +1,459 @@
+public with sharing class EdicaoTaxas_controller {
+    
+    private Opportunity opp;
+    public boolean canEdit { get; set; }
+    
+    public EdicaoTaxas_controller(ApexPages.StandardController stdController) {
+        if (!Test.isRunningTest())
+ {
+  stdController.addFields(new List<String>{'StageName'});
+ }
+ Opportunity opp=(Opportunity) stdController.getRecord();
+        canEdit= opp.stagename !='Prospecção' && opp.stagename !='Visita agendada'  && opp.stagename !='Em negociação'  && opp.stagename !='Qualificação'  
+            && opp.stagename    !='	Taxa fechada' && opp.stagename !='Agendamento e preparação da visita';
+    }
+    
+    public EdicaoTaxas_controller(){
+        
+    }
+    
+    @RemoteAction
+    public static BaseData getBaseData(String oppId) {
+        
+        BaseData base = new BaseData();
+        base.listRates = new List<Rates>();
+        
+        Opportunity opp = [SELECT RecordType.Name, Vers_o_da_taxa__c  FROM Opportunity WHERE id =: oppId][0];
+        base.typeOpp = opp.RecordType.Name;
+        // JCOSTA TODO: RECUPERAR O PRECO DE CUSTO
+        List<Taxa_oportunidade__c> listRates = [
+            SELECT Id
+            , Name
+            , Bandeira__c
+            , Taxa_administracao_padrao__c
+            , Taxa_administracao_realizada__c
+            , Taxa_Administracao_Vigente__c
+            , Taxa_antecipacao_padrao__c
+            , Taxa_antecipacao_realizada__c
+            , Taxa_Antecipacao_Vigente__c
+            , Taxa_servico_padrao__c
+            , Taxa_servico_realizada__c
+            , Taxa_Servico_Vigente__c
+            ,Taxa_N_o_Geradora_Padr_o__c
+            ,Taxa_N_o_Geradora_Realizada__c
+            ,Taxa_N_o_Geradora_Vigente__c
+            ,Taxa_de_antecipa_o_Minima__c
+            ,Taxa_de_antecipa_o_Intermediaria__c
+            ,Taxa_de_custo__c
+            ,Oportunidade__c
+            , RecordType.Name
+            FROM Taxa_oportunidade__c WHERE Oportunidade__c =: oppId 
+        ];
+        // JCOSTA TODO: SETAR O PRECO DE CUSTO
+        for (Taxa_oportunidade__c item : listRates) {
+            Rates rate = new Rates();
+            rate.id = item.Id;
+            rate.taxa = item.Name;
+            rate.bandeira = item.Bandeira__c;
+            rate.taxaAntInter = (item.Taxa_de_antecipa_o_Intermediaria__c == null ? 0: item.Taxa_de_antecipa_o_Intermediaria__c);
+            rate.taxaAntMin = (item.Taxa_de_antecipa_o_Minima__c == null ? 0: item.Taxa_de_antecipa_o_Minima__c);
+            rate.taxaCusto = (item.Taxa_de_custo__c == null ? 0: item.Taxa_de_custo__c);
+            rate.taxaServVigente = (item.Taxa_Servico_Vigente__c == null ? 0: item.Taxa_Servico_Vigente__c);
+            rate.taxaServPadrao = (item.Taxa_servico_padrao__c == null ? 0: item.Taxa_servico_padrao__c);
+            rate.taxaServRealizada = (item.Taxa_servico_realizada__c == null ? 0: item.Taxa_servico_realizada__c);
+            rate.taxaAdmVigente = (item.Taxa_Administracao_Vigente__c == null ? 0: item.Taxa_Administracao_Vigente__c);
+            rate.taxaAdmPadrao = (item.Taxa_administracao_padrao__c == null ? 0: item.Taxa_administracao_padrao__c);
+            rate.taxaAdmRealizada = (item.Taxa_administracao_realizada__c == null ? 0: item.Taxa_administracao_realizada__c);
+            rate.taxaAntecipVigente = (item.Taxa_Antecipacao_Vigente__c == null ? 0: item.Taxa_Antecipacao_Vigente__c);
+            rate.taxaAntecipPadrao = (item.Taxa_antecipacao_padrao__c == null ? 0: item.Taxa_antecipacao_padrao__c);
+            rate.taxaAntecipRealizada = (item.Taxa_antecipacao_realizada__c == null ? 0: item.Taxa_antecipacao_realizada__c);
+            rate.taxaNGeradoraRealizada = (item.Taxa_N_o_Geradora_Realizada__c == null ? 0: item.Taxa_N_o_Geradora_Realizada__c);
+            rate.taxaNGeradoraPadrao = (item.Taxa_N_o_Geradora_Padr_o__c == null ? 0: item.Taxa_N_o_Geradora_Padr_o__c);
+            rate.taxaNGeradoraVigente = (item.Taxa_N_o_Geradora_Vigente__c == null ? 0: item.Taxa_N_o_Geradora_Vigente__c);
+            rate.tipo = item.RecordType.Name;
+            rate.oppId = oppId;
+            
+            base.listRates.add(rate);
+        }
+        system.debug('base '+base);
+        return base;
+    }
+    
+    @RemoteAction
+    public static BaseData updateData(List<RatesToUpdate> listUpdate) {
+        BaseData bd = new BaseData();
+        bd.head='';
+        bd.bo='';
+        bd.clevel='';
+        Integer saudeAdm=3;
+        Integer saudeMDR=3;
+        Integer saudeAnt=3;
+        //JCOSTA apos atualizar o JS, listUpdate TEm as taxas padrão e custo.
+        boolean mdrAbaixoPadrao = false;
+        boolean mdrAbaixoCusto = false;
+        boolean admAbaixoPadrao =false;
+        boolean admAbaixoDesconto =false;
+        boolean antAbaixoPadrao =false;
+        boolean antAbaixoInter=false;
+        boolean antAbaixoMin=false;
+        // boolean appBo = false;
+        List<Taxa_oportunidade__c> listRates = new List<Taxa_oportunidade__c>();
+        Beblue_Parameter__mdt parametro = [Select Max_Tax_Discount__c from Beblue_Parameter__mdt where MasterLabel='Default'];
+        boolean attCheck = false;
+        boolean hasAtt;
+        boolean appBo = false;
+        boolean appClevel =false;
+        string band='';
+        Id oppid;
+        Id manutencaoId = Schema.SObjectType.Opportunity
+            .getRecordTypeInfosByName().get('Manutenção de taxas').getRecordTypeId();
+        Opportunity oppToCheck = null;
+        system.debug('LIST UPDATE' + listUpdate);
+        User u = [SELECT id, Ignorar_Valida_o_de_Taxas__c From user where id=:UserInfo.getUserId()];
+        for (RatesToUpdate item : listUpdate) {
+            boolean vigServFlag = true;
+            if(item.taxaServVigente<item.taxaServRealizada && item.taxaServVigente>0)
+            {
+                vigServFlag =false;
+            }
+            boolean vigAdmFlag = true;
+            system.debug(item.taxaAdmVigente +' item.taxaAdmVigente');
+            if(item.taxaAdmVigente<item.taxaAdmRealizada && item.taxaAdmVigente>0)
+            {
+                vigAdmFlag =false;
+            }
+            boolean vigAntFlag = true;
+            
+            if(item.taxaAntecipVigente<item.taxaAntecipRealizada && item.taxaAntecipVigente>0)
+            {
+                vigAntFlag =false;
+            }
+            
+            
+            oppid=item.oppId;
+            if(oppToCheck==null)
+            {
+                oppToCheck= [select recordtypeid from Opportunity where Id=:oppid];
+            }
+            //if(oppToCheck.recordtypeid!=manutencaoId)
+            {
+                
+                if(item.bandeira=='Beblue')//MTR
+                {   system.debug('ENTROU Beblue');
+                 if(vigAdmFlag && item.taxaAdmRealizada<item.taxaAdmPadrao-parametro.Max_Tax_Discount__c && !u.Ignorar_Valida_o_de_Taxas__c)
+                 { 
+                     /* system.debug('ENTROU 1');
+DMLException exp = new DMLException();
+{
+exp.setMessage('Revise a taxa aplicada, taxa administrativa inferior ao permitido.'); 
+throw exp;
+}*/
+                     admAbaixoDesconto=true;
+                     //document.getElementById('msg').innerHTML = 'Revise a taxa aplicada, taxa administrativa inferior ao permitido.(1).';
+                     
+                 }
+                 else if(vigAdmFlag && item.taxaAdmRealizada<item.taxaAdmPadrao)
+                 {  system.debug('ENTROU 2.1');
+                  admAbaixoPadrao =true;
+                  
+                  /*
+if(vigAdmFlag && !hasAtt && !u.Ignorar_Valida_o_de_Taxas__c)
+{
+DMLException exp = new DMLException();
+{ system.debug('ENTROU 2.2');
+exp.setMessage('Anexo necessário para conclusão.'); 
+throw exp;
+}
+
+}*/
+                  
+                 }
+                 if(vigAntFlag && item.taxaAntecipRealizada<item.taxaAntMin && !u.Ignorar_Valida_o_de_Taxas__c)
+                 {
+                     
+                     antAbaixoMin=true ;
+                 }
+                 else if(vigAntFlag && item.taxaAntecipRealizada<item.taxaAntInter && !u.Ignorar_Valida_o_de_Taxas__c)
+                 {
+                     antAbaixoInter =true;
+                 }
+                 else if(vigAntFlag && item.taxaAntecipRealizada<item.taxaAntecipPadrao && !u.Ignorar_Valida_o_de_Taxas__c)
+                 {
+                     antAbaixoPadrao =true;
+                 }
+                }
+                else
+                { system.debug('ENTROU ELO/VISA');
+                 if(vigAntFlag && item.taxaAntecipRealizada<item.taxaAntMin && !u.Ignorar_Valida_o_de_Taxas__c)
+                 {
+                     
+                     antAbaixoMin=true ;
+                 }
+                 else if(vigAntFlag && item.taxaAntecipRealizada<item.taxaAntInter && !u.Ignorar_Valida_o_de_Taxas__c)
+                 {
+                     antAbaixoInter =true;
+                 }
+                 else if(vigAntFlag && item.taxaAntecipRealizada<item.taxaAntecipPadrao && !u.Ignorar_Valida_o_de_Taxas__c)
+                 {
+                     antAbaixoPadrao =true;
+                 }
+                 if(vigAdmFlag &&item.taxaAdmRealizada<item.taxaAdmPadrao-parametro.Max_Tax_Discount__c && !u.Ignorar_Valida_o_de_Taxas__c)
+                 { system.debug('ENTROU 3');
+                  admAbaixoDesconto=true;
+                  /*DMLException exp = new DMLException();
+{
+exp.setMessage('Revise a taxa aplicada, taxa administrativa inferior ao permitido.'); 
+throw exp;
+}*/
+                 }
+                 else { 
+                     if(vigAdmFlag && item.taxaAdmRealizada<item.taxaAdmPadrao)
+                     { system.debug('ENTROU 4');
+                      admAbaixoPadrao =true;
+                      /*if(vigAdmFlag && !hasAtt && !u.Ignorar_Valida_o_de_Taxas__c)
+{ system.debug('ENTROU 5');
+DMLException exp = new DMLException();
+{
+exp.setMessage('Anexo necessário para conclusão, taxa administrativa inferior ao padrão.'); 
+throw exp;
+}
+}
+*/
+                     }
+                 }
+                 if(vigServFlag && item.taxaServRealizada<item.taxaCusto)
+                 { system.debug('ENTROU 6');
+                  /*
+if(!hasAtt && !u.Ignorar_Valida_o_de_Taxas__c)
+{ system.debug('ENTROU 7');
+
+DMLException exp = new DMLException();
+{
+exp.setMessage('Anexo necessário para conclusão, taxa serviço inferior à taxa de custo.'); 
+throw exp;
+}
+}
+*/
+                  mdrAbaixoCusto=true;
+                  
+                 }
+                 else if(vigServFlag && item.taxaServRealizada<item.taxaServPadrao)
+                 { system.debug('ENTROU 8');
+                  mdrAbaixoPadrao=true;
+                  /*
+if(!hasAtt && !u.Ignorar_Valida_o_de_Taxas__c)
+{ system.debug('ENTROU 9');
+DMLException exp = new DMLException();
+{
+exp.setMessage('Anexo necessário para conclusão, taxa serviço inferior ao padrão.'); 
+throw exp;
+}
+}*/
+                 }
+                }
+            }
+            Taxa_oportunidade__c rate = new Taxa_oportunidade__c();
+            rate.Id = item.id;
+            rate.Taxa_N_o_Geradora_realizada__c  = item.taxaNGeradoraRealizada;
+            rate.Taxa_servico_realizada__c = item.taxaServRealizada;
+            rate.Taxa_administracao_realizada__c = item.taxaAdmRealizada;
+            rate.Taxa_antecipacao_realizada__c = item.taxaAntecipRealizada;
+            listRates.add(rate);
+            band=band +' '+item.bandeira;
+        }
+        if(!attCheck)
+        {
+            hasAtt= hasAttachment(oppId);
+            attCheck=true;
+        } 
+        
+        
+        if(antAbaixoMin)
+        {
+            saudeAnt=0;
+           appClevel =true;
+        }
+        else if(antAbaixoInter)
+        {
+            saudeAnt=1;
+           appBo=true;
+        }
+        else if(antAbaixoPadrao)
+        {
+            saudeAnt=2;
+            //head
+        }
+        
+        if(mdrAbaixoCusto)
+        {
+            saudeMDR=1;
+        }else if(mdrAbaixoPadrao)
+        {
+            
+            saudeMDR=2;
+        }
+        if(admAbaixoDesconto) 
+        {
+            saudeAdm=1;
+        }
+        else if(admAbaixoPadrao)
+        {
+            saudeAdm=2;
+        }
+        if(mdrAbaixoCusto &&(admAbaixoPadrao|| admAbaixoDesconto))
+        {
+            appBo=true;
+        }
+        if((((!mdrAbaixoCusto && mdrAbaixoPadrao)  && (admAbaixoPadrao|| admAbaixoDesconto) )||((!mdrAbaixoCusto && !mdrAbaixoPadrao && admAbaixoDesconto)))&& !u.Ignorar_Valida_o_de_Taxas__c )
+        { system.debug('ENTROU 9');
+         DMLException exp = new DMLException();
+         { 
+             exp.setMessage('Taxas inferiores ao permitido.'); 
+             throw exp;
+         }
+        }
+        else if((admAbaixoPadrao|| admAbaixoDesconto||mdrAbaixoCusto||mdrAbaixoPadrao) &&(!hasAtt && !u.Ignorar_Valida_o_de_Taxas__c))
+        {
+            { system.debug('ENTROU 9');
+             DMLException exp = new DMLException();
+             {
+                 exp.setMessage('Anexo necessário para conclusão, taxa serviço inferior ao padrão.'); 
+                 throw exp;
+             }
+            }
+        }
+        else{
+            if( ((admAbaixoPadrao ||(admAbaixoDesconto && mdrAbaixoCusto)  ) ||(antAbaixoPadrao||antAbaixoMin||antAbaixoInter )) && !u.Ignorar_Valida_o_de_Taxas__c ){
+                system.debug('ENTROU 10');
+                boolean achouhead=false;
+                Opportunity oppHead = [SELECT OwnerId,Owner.ManagerId, HeadCtrl__c, HeadName__c FROM Opportunity WHERE id =: oppId LIMIT 1];
+                User namerole = [SELECT Id, Name, UserRole.Name FROM User WHERE id =: oppHead.OwnerId LIMIT 1];
+                
+                if(namerole.UserRole.Name.contains('Head') || oppHead.Owner.ManagerId == null){
+                    System.debug('ENTROU 11');
+                    
+                    achouhead = true;
+                    oppHead.HeadCtrl__c = true;
+                    //oppHead.HeadCtrlName__c = namerole.Name;
+                    oppHead.HeadName__c = namerole.Id;
+                    
+                    If( oppHead.Owner.ManagerId == null && !namerole.UserRole.Name.contains('Head') )
+                    { System.debug('ENTROU 12');
+                     DMLException exp = new DMLException();
+                     {
+                         exp.setMessage('Atenção, o usuário não possui nenhum Head.'); 
+                         throw exp;
+                     }
+                    } 
+                }
+                
+                Id aux = oppHead.OwnerId;
+                
+                while (!achouhead){
+                    if(aux==null){ 
+                        System.debug('ENTROU 12');
+                        DMLException exp = new DMLException();
+                        {
+                            exp.setMessage('Atenção, o usuário não possui nenhum Head.'); 
+                            throw exp;
+                        }
+                        
+                    }
+                    oppHead = [SELECT OwnerId,Owner.ManagerId FROM Opportunity WHERE id =: oppId LIMIT 1];
+                    namerole = [SELECT Id, Name, UserRole.Name, ManagerId FROM User WHERE id =: aux LIMIT 1];
+                    //encontrou o head? 
+                    // if(namerole.UserRole.Name.contains('Head') || oppHead.Owner.ManagerId == null || namerole.ManagerId == null){
+                    if(namerole.UserRole.Name.contains('Head') || aux == null){
+                        system.debug('ENTROU 13');
+                        achouhead = true;                  
+                        
+                        //oppHead.OwnerId = namerole.Id;
+                        // If( (namerole.ManagerId==null ||oppHead.Owner.ManagerId == null) && !namerole.UserRole.Name.contains('Head'))
+                        If( (aux == null) && !namerole.UserRole.Name.contains('Head'))
+                        { system.debug('ENTROU 14');
+                         DMLException exp = new DMLException();
+                         {
+                             exp.setMessage('This is a system thrown exception'); 
+                             throw exp;
+                         }
+                        }
+                        break;
+                    }//else
+                    else{
+                        system.debug('ENTROU 15');
+                        aux = namerole.ManagerId;
+                    }
+                }
+                if(achouhead == true ){
+                    system.debug('ENTROU 16 - ' + namerole.id);
+                    oppHead.HeadCtrl__c = true;
+                    //oppHead.HeadCtrlName__c = namerole.id;
+                    //oppHead.HeadCtrlName__c = namerole.Name;
+                    oppHead.HeadName__c = namerole.Id;
+                    oppHead.SaudeAdm__c=saudeAdm;
+                    oppHead.saudeMDR__c=saudeMDR;
+                    oppHead.saudeAnt__c = saudeAnt;
+                    oppHead.Aprova_o_Diretoria__c=appClevel;
+                    //appBo = true;
+                    oppHead.Aprovacao_backoffice__c=appBo;
+                    if(appClevel)
+                    {
+                        bd.clevel = 'Oportunidade passará por aprovação de C-Level.';
+                    }
+                    else if(appBo)
+                    {
+                        bd.bo='Oportunidade passará por aprovação de backoffice.';
+                    }
+                    bd.head='Oportunidade passará por aprovação de Head.';
+                    update oppHead;
+                    
+                }
+                
+                //opp
+                //gerar aprovação de head
+            }
+            else{
+                
+                Opportunity oppHead = [SELECT OwnerId,Owner.ManagerId, HeadCtrl__c FROM Opportunity WHERE id =: oppId LIMIT 1];
+                oppHead.HeadCtrl__c = false;
+                oppHead.Aprova_o_Diretoria__c=appClevel;
+                oppHead.Aprovacao_backoffice__c=appBo;
+                //oppHead.HeadCtrlName__c = null;
+                oppHead.HeadName__c = null;
+                oppHead.SaudeAdm__c=saudeAdm;
+                oppHead.saudeMDR__c=saudeMDR;
+                oppHead.saudeAnt__c = saudeAnt;
+                update oppHead;
+            }
+            
+            update listRates;
+            return bd;
+        }
+        return bd;
+    }
+    public static boolean hasAttachment   (String oppId)
+    {
+        list<ContentDocumentLink > lAtt = [ select id from ContentDocumentLink  where LinkedEntityId =:oppId ];
+        return lAtt.size() >0 ? true: false;
+    }
+    public class BaseData {
+        public List<Rates> listRates;
+        //public String versaoTx;
+        public String typeOpp;
+        public String head;
+        public String bo;
+         public String clevel;
+    }
+    
+    class Rates {
+        String id, taxa, bandeira, tipo,oppId;
+        Double taxaNGeradoraRealizada,taxaNGeradoraPadrao,taxaNGeradoraVigente,taxaAntInter,taxaAntMin, taxaCusto, taxaServPadrao, taxaServRealizada, taxaAdmPadrao, taxaAdmRealizada, taxaAntecipPadrao, taxaAntecipRealizada, taxaServVigente, taxaAdmVigente, taxaAntecipVigente;
+        Boolean changed = false;
+    }
+    
+    public class RatesToUpdate {
+        public String id, bandeira,oppId;
+        public Double taxaNGeradoraRealizada,taxaNGeradoraPadrao,taxaNGeradoraVigente,taxaAntecipPadrao, taxaAntInter,taxaAntMin,taxaServVigente, taxaAdmVigente, taxaAntecipVigente, taxaServRealizada, taxaAdmRealizada, taxaAntecipRealizada, taxaServPadrao, taxaCusto, taxaAdmPadrao;
+    }
+    
+}
