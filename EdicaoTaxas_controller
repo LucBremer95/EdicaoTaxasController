@@ -24,6 +24,7 @@ public with sharing class EdicaoTaxas_controller {
         base.listRates = new List<Rates>();
         
         Opportunity opp = [SELECT RecordType.Name, Vers_o_da_taxa__c  FROM Opportunity WHERE id =: oppId][0];
+        // Realiza uma query que traz o nome do RecordyType a versão da taxa_c onde o Id da oportunidade é igual ao oppId
         base.typeOpp = opp.RecordType.Name;
         // JCOSTA TODO: RECUPERAR O PRECO DE CUSTO
         List<Taxa_oportunidade__c> listRates = [
@@ -50,6 +51,7 @@ public with sharing class EdicaoTaxas_controller {
             FROM Taxa_oportunidade__c WHERE Oportunidade__c =: oppId 
         ];
         // JCOSTA TODO: SETAR O PRECO DE CUSTO
+        // Realiza uma Query que traz o ID, Nome, Badeira, Todos os Tipos de taxas, a oportunidade e o nome do RecordType da tabela Taxa_oportunidade_c, onde Oportunidade_c é igual ao oppId
         for (Taxa_oportunidade__c item : listRates) {
             Rates rate = new Rates();
             rate.id = item.Id;
@@ -74,6 +76,7 @@ public with sharing class EdicaoTaxas_controller {
             rate.oppId = oppId;
             
             base.listRates.add(rate);
+            // Conjunto de condicional "IF" que verifica se as taxas estão nulas , caso sim atribui zero como valor caso não recebe o valor o objeto 
         }
         system.debug('base '+base);
         return base;
@@ -89,6 +92,7 @@ public with sharing class EdicaoTaxas_controller {
         Integer saudeMDR=3;
         Integer saudeAnt=3;
         //JCOSTA apos atualizar o JS, listUpdate TEm as taxas padrão e custo.
+        //Criação das variaveis de TaxaADM, TaxaMDR e Taxa de antecipação
         boolean mdrAbaixoPadrao = false;
         boolean mdrAbaixoCusto = false;
         boolean admAbaixoPadrao =false;
@@ -97,12 +101,14 @@ public with sharing class EdicaoTaxas_controller {
         boolean antAbaixoInter=false;
         boolean antAbaixoMin=false;
         // boolean appBo = false;
+        // Criação das variaves booleanas de controle do cenario de taxas
         List<Taxa_oportunidade__c> listRates = new List<Taxa_oportunidade__c>();
         Beblue_Parameter__mdt parametro = [Select Max_Tax_Discount__c from Beblue_Parameter__mdt where MasterLabel='Default'];
         boolean attCheck = false;
         boolean hasAtt;
         boolean appBo = false;
         boolean appClevel =false;
+        // Criação das variaveis booleanas de check de flag e os personagens de aprovação
         string band='';
         Id oppid;
         Id manutencaoId = Schema.SObjectType.Opportunity
@@ -110,6 +116,7 @@ public with sharing class EdicaoTaxas_controller {
         Opportunity oppToCheck = null;
         system.debug('LIST UPDATE' + listUpdate);
         User u = [SELECT id, Ignorar_Valida_o_de_Taxas__c From user where id=:UserInfo.getUserId()];
+        // Realiza uma query que traz o Id do usuario, um campo booleano que verifica se usuario pode pular regra de validação, onde o id do usuario é igual UserInfo.getUserId() 
         for (RatesToUpdate item : listUpdate) {
             boolean vigServFlag = true;
             if(item.taxaServVigente<item.taxaServRealizada && item.taxaServVigente>0)
@@ -150,12 +157,12 @@ throw exp;
 }*/
                      admAbaixoDesconto=true;
                      //document.getElementById('msg').innerHTML = 'Revise a taxa aplicada, taxa administrativa inferior ao permitido.(1).';
-                     
+                     // Condicional que verifica se Taxa ADM esta abaixo do padrão ou não, se estiver a varivel admAbaixoDesconto assume valor True
                  }
                  else if(vigAdmFlag && item.taxaAdmRealizada<item.taxaAdmPadrao)
                  {  system.debug('ENTROU 2.1');
                   admAbaixoPadrao =true;
-                  
+                  // Caso cair na condicional acima a variavel admAbaixoPadrao tambem assume valor True.
                   /*
 if(vigAdmFlag && !hasAtt && !u.Ignorar_Valida_o_de_Taxas__c)
 {
@@ -172,15 +179,17 @@ throw exp;
                  {
                      
                      antAbaixoMin=true ;
+                     // Verifica a condição para  a taxa de antecipação realizada estar ou não abaixo do minimo 
                  }
                  else if(vigAntFlag && item.taxaAntecipRealizada<item.taxaAntInter && !u.Ignorar_Valida_o_de_Taxas__c)
                  {
                      antAbaixoInter =true;
+                     // Verifica a condição para  a taxa de antecipação realizada estar ou não abaixo do valor intermediario
                  }
                  else if(vigAntFlag && item.taxaAntecipRealizada<item.taxaAntecipPadrao && !u.Ignorar_Valida_o_de_Taxas__c)
                  {
                      antAbaixoPadrao =true;
-                 }
+                     // Verifica a condição para  a taxa de antecipação realizada estar ou não abaixo do Padrão
                 }
                 else
                 { system.debug('ENTROU ELO/VISA');
@@ -188,19 +197,23 @@ throw exp;
                  {
                      
                      antAbaixoMin=true ;
+                     // Verifica a condição para  a taxa de antecipação realizada estar ou não abaixo do valor minimo para bandeira ELO/VISA
                  }
                  else if(vigAntFlag && item.taxaAntecipRealizada<item.taxaAntInter && !u.Ignorar_Valida_o_de_Taxas__c)
                  {
                      antAbaixoInter =true;
+                      // Verifica a condição para  a taxa de antecipação realizada estar ou não abaixo do valor intermediario para bandeira ELO/VISA
                  }
                  else if(vigAntFlag && item.taxaAntecipRealizada<item.taxaAntecipPadrao && !u.Ignorar_Valida_o_de_Taxas__c)
                  {
                      antAbaixoPadrao =true;
+                      // Verifica a condição para  a taxa de antecipação realizada estar ou não abaixo do Padrão para bandeira ELO/VISA
                  }
                  if(vigAdmFlag &&item.taxaAdmRealizada<item.taxaAdmPadrao-parametro.Max_Tax_Discount__c && !u.Ignorar_Valida_o_de_Taxas__c)
                  { system.debug('ENTROU 3');
                   admAbaixoDesconto=true;
                   /*DMLException exp = new DMLException();
+                  // Condição que verifica se a taxa ADM realizada esta abaixo do desconto permitido para o debug 'Entrou 3'
 {
 exp.setMessage('Revise a taxa aplicada, taxa administrativa inferior ao permitido.'); 
 throw exp;
@@ -210,6 +223,7 @@ throw exp;
                      if(vigAdmFlag && item.taxaAdmRealizada<item.taxaAdmPadrao)
                      { system.debug('ENTROU 4');
                       admAbaixoPadrao =true;
+                      // Caso a situação não caia na condicional do IF acima, este IF ira verifiar se a taxaADM realizada esta abaixo do padrão.
                       /*if(vigAdmFlag && !hasAtt && !u.Ignorar_Valida_o_de_Taxas__c)
 { system.debug('ENTROU 5');
 DMLException exp = new DMLException();
@@ -231,6 +245,7 @@ DMLException exp = new DMLException();
 {
 exp.setMessage('Anexo necessário para conclusão, taxa serviço inferior à taxa de custo.'); 
 throw exp;
+// Condicional que verifica se Taxa de serviço esta abaixo da taxa de custo
 }
 }
 */
@@ -272,25 +287,30 @@ throw exp;
         {
             saudeAnt=0;
            appClevel =true;
+           // verifica se variavel booleana que acena para taxa de antecipação estar abaixo do minimo esta com valor True, se sim a variavel saudeAnt recebe valor zero e appClevel fica true.
         }
         else if(antAbaixoInter)
         {
             saudeAnt=1;
            appBo=true;
+            // verifica se variavel booleana que acena para taxa de antecipação estar abaixo do Intermediario esta com valor True, se sim a variavel saudeAnt recebe valor 1 e appBO fica true.
         }
         else if(antAbaixoPadrao)
         {
             saudeAnt=2;
             //head
+             // verifica se variavel booleana que acena para taxa de antecipação estar abaixo do Padrão esta com valor True, se sim a variavel saudeAnt recebe valor 2.
         }
         
         if(mdrAbaixoCusto)
         {
             saudeMDR=1;
+             // verifica se variavel booleana que acena para taxa MDR estar abaixo do Custo esta com valor True, se sim a variavel SaudeMDR recebe valor 1.
         }else if(mdrAbaixoPadrao)
         {
             
             saudeMDR=2;
+             // verifica se variavel booleana que acena para taxa MDR estar abaixo do padrão esta com valor True, se sim a variavel SaudeMDR recebe valor 2.
         }
         if(admAbaixoDesconto) 
         {
